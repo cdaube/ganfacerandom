@@ -1,4 +1,4 @@
-import sys, os, socket
+import sys, socket
 hostname = socket.gethostname()
 if hostname=='chrisd1-pc.psy.gla.ac.uk':
     homeDir = '/analyse/cdhome/'
