@@ -3,6 +3,7 @@ from sklearn.linear_model import Ridge
 from skopt import BayesSearchCV
 from scipy.io import loadmat
 from scipy.stats import kendalltau
+from sklearn.metrics import r2_score
 import numpy as np
 import datetime
 import warnings
@@ -22,18 +23,20 @@ def shuffled(input):
     return(input)
 
 # helper to extract block wise Kendall's Tau of predictions
-def extractKT(Xsplit,Ysplit,mdl,nBlocks):
+def extractPerformance(Xsplit,Ysplit,mdl,nBlocks):
     # preallocation of output structure
     test_KT_observed = np.zeros((nBlocks))
+    test_R2_observed = np.zeros((nBlocks))
     # loop through blocks
     for bb in range(nBlocks):
         # get this block's model and predict responses
         thsPredictions = mdl['estimator'][bb].predict(Xsplit[bb])
         thsObservations = Ysplit[bb]
         # measure Kendall's Tau
-        test_KT_observed[bb] = kendalltau(thsPredictions,thsObservations,method='asymptotic')[0]
-
-    return test_KT_observed
+        test_KT_observed[bb] = kendalltau(thsObservations,thsPredictions,method='asymptotic')[0]
+        test_R2_observed[bb] = r2_score(thsObservations,thsPredictions)
+        
+    return test_KT_observed, test_R2_observed
 
 
 def loadOrigOrderLatents(nTrials,nDimsSG2,nDimsShape,nBlocks,nTrialsPerBlock,proj0257Dir):
@@ -145,15 +148,15 @@ def trainModelExtractPerformances(X, Y, nBlocks, n_iter=30):
                          verbose=2,
                          n_jobs=10)
     # extract outputs (performances)
-    test_R2_sg_observed = mdl['test_score']
-    train_R2_sg_observed = mdl['train_score']
-    test_KT_sg_observed = extractKT(Xsplit,Ysplit,mdl,nBlocks)
+    test_R2_observed = mdl['test_score']
+    train_R2_observed = mdl['train_score']
+    test_KT_observed, __ = extractPerformance(Xsplit,Ysplit,mdl,nBlocks) # here, __ == test_R2_observed
 
     allCoef = np.zeros((X.shape[1],nBlocks))
     for ii, thsMdl in enumerate(mdl['estimator']):
         allCoef[:,ii] = thsMdl.best_estimator_.coef_
 
-    return test_R2_sg_observed, train_R2_sg_observed, test_KT_sg_observed, allCoef
+    return test_R2_observed, train_R2_observed, test_KT_observed, allCoef
 
 
 def perm_trainModelExtractPerformances(X, Y, nBlocks, nPermutations, ss, n_iter=30):
@@ -194,6 +197,38 @@ def perm_trainModelExtractPerformances(X, Y, nBlocks, nPermutations, ss, n_iter=
         # store scores
         test_R2_perm[pp,:] = mdlPerm_sg['test_score']
         train_R2_perm[pp,:] = mdlPerm_sg['train_score']
-        test_KT_perm[pp,:] = extractKT(Xsplit,permYsplit,mdlPerm_sg,nBlocks)
+        test_KT_perm[pp,:], __ = extractPerformance(Xsplit,permYsplit,mdlPerm_sg,nBlocks)
 
     return test_R2_perm, test_KT_perm, train_R2_perm
+
+
+def subset_trainModelExtractPerformances(X, Y, nBlocks, nTrlPerFold, n_iter=30):
+
+    Xsplit = np.array_split(X,nBlocks,axis=0)
+    Ysplit = np.array_split(Y.flatten(),nBlocks,axis=0)
+
+    Xsubset = np.vstack([fold[:nTrlPerFold,:] for fold in Xsplit])
+    Ysubset = np.vstack([fold[:nTrlPerFold,np.newaxis] for fold in Ysplit])
+
+    # define cross-validation for inner and outer loops
+    cvOuter = KFold(nBlocks)
+    cvInner = KFold(nBlocks-1)
+    # define hyperparameter optimisation
+    search = {'alpha': (1e-4, 1e6, "log-uniform")}
+    bayesRidgeTuner = BayesSearchCV(estimator=Ridge(), search_spaces=search, cv=cvInner, n_iter=n_iter)
+    # train model on observed data
+    mdl = cross_validate(bayesRidgeTuner, Xsubset, Ysubset, cv=cvOuter, 
+                         return_estimator=True, 
+                         return_train_score=True, 
+                         verbose=2,
+                         n_jobs=10)
+    # extract outputs (performances)
+    test_R2_observed_subset = mdl['test_score'] # this is the performance on the reduced test set
+    train_R2_observed = mdl['train_score']
+    test_KT_observed, test_R2_observed = extractPerformance(Xsplit,Ysplit,mdl,nBlocks) # this tests full 200 trials with model trained on less
+
+    allCoef = np.zeros((X.shape[1],nBlocks))
+    for ii, thsMdl in enumerate(mdl['estimator']):
+        allCoef[:,ii] = thsMdl.best_estimator_.coef_
+
+    return test_R2_observed, train_R2_observed, test_KT_observed, allCoef, test_R2_observed_subset

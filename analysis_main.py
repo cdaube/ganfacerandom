@@ -32,6 +32,7 @@ def main(args):
     nDimsShape = 300
     nCompsToTry = list(range(1,5))+list(range(5,50,5))+list(range(50,350,50))
     nCompsToTryPlus = nCompsToTry + ['raw']
+    trainSubsets = range(5,205,5)
 
     # load styleGAN2 and shape latents in original order (does not correspond to experimental order of any participant)
     XsgOrig, XshapeOrig = loadOrigOrderLatents(nTrials,nDimsSG2,nDimsShape,nBlocks,nTrialsPerBlock,proj0257Dir)
@@ -148,6 +149,23 @@ def main(args):
                         train_R2_joint_observed=train_R2_joint_observed,
                         coef_joint=coef_joint)
 
+        if args.trainOnSubset:
+            for nTrlPerFold in trainSubsets:
+                test_R2_sg_observed, train_R2_sg_observed, test_KT_sg_observed, __, test_R2_sg_observed_subset = \
+                    subset_trainModelExtractPerformances(Xsg, Y, nBlocks, nTrlPerFold)
+                test_R2_shape_observed, train_R2_shape_observed, test_KT_shape_observed, __, test_R2_shape_observed_subset = \
+                    subset_trainModelExtractPerformances(Xshape, Y, nBlocks, nTrlPerFold)
+
+                np.savez(f"{outBaseDir}/performancesSubset/F{ss+1:02d}_nTrlPerFold{nTrlPerFold:03d}_performances_observed.npz", 
+                    test_R2_sg_observed=test_R2_sg_observed,
+                    test_R2_sg_observed_subset=test_R2_sg_observed_subset,
+                    test_KT_sg_observed=test_KT_sg_observed,
+                    train_R2_sg_observed=train_R2_sg_observed,
+                    test_R2_shape_observed=test_R2_shape_observed,
+                    test_R2_shape_observed_subset=test_R2_shape_observed_subset,
+                    test_KT_shape_observed=test_KT_shape_observed,
+                    train_R2_shape_observed=train_R2_shape_observed)
+
 
 def parseArgs(argv):
     # parameters determine what parts of the code is run
@@ -160,6 +178,7 @@ def parseArgs(argv):
     parser.add_argument('--permutations', action='store_true')
     parser.add_argument('--pcamarginal', action='store_true')
     parser.add_argument('--pcajoint', action='store_true')
+    parser.add_argument('--trainOnSubset', action='store_true')
 
     args = parser.parse_args()
     return args
